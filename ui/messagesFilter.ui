@@ -33,7 +33,7 @@
          <bool>false</bool>
         </property>
         <property name="placeholderText">
-         <string>Search message/field (regex allowed)</string>
+         <string>Search message/id/field (regex allowed)</string>
         </property>
         <property name="clearButtonEnabled">
          <bool>true</bool>

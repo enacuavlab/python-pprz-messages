@@ -30,6 +30,10 @@ class TimedPprzMessage():
         self.msg = msg
         self._timestamp = time.time_ns() if t is None else t
     
+    @property
+    def fieldnames(self) -> list[str]:
+        return self.msg.fieldnames
+    
     def get_full_field(self, fieldname:str) -> PprzMessageField:
         return self.msg.get_full_field(fieldname)
     
@@ -126,6 +130,9 @@ class MessageLog():
     
     def get_full_field(self, fieldname:str) -> PprzMessageField:
         return self.newest().get_full_field(fieldname)
+    
+    def fieldnames(self) -> list[str]:
+        return self.newest().fieldnames
     
 
     

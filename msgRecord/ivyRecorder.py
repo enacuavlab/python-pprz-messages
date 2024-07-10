@@ -46,6 +46,9 @@ class IvyRecorder(QObject):
         # Mapping : sender_id -> class_id -> message_id -> MessageLog
         self.records:dict[int,dict[int,dict[int,MessageLog]]] = dict()
         
+        # Mapping : class_id -> class_name
+        self.classNames:dict[int,str] = dict()
+        
         
         # Subscribe to everything for detecting senders
         self.ivy.subscribe(self.__detectSenders)
@@ -70,12 +73,13 @@ class IvyRecorder(QObject):
         except KeyError:
             self.records[sender_id][timed_msg.class_id] = dict()
             class_dict = self.records[sender_id][timed_msg.class_id]
+            self.classNames[timed_msg.class_id] = timed_msg.msg_class
         
         try:
-            self.records[sender_id][timed_msg.class_id][timed_msg.msg_id].addMessage(timed_msg)
+            class_dict[timed_msg.msg_id].addMessage(timed_msg)
         except KeyError:
-            self.records[sender_id][timed_msg.class_id][timed_msg.msg_id] = MessageLog(self.buffer_size)
-            self.records[sender_id][timed_msg.class_id][timed_msg.msg_id].addMessage(timed_msg)
+            class_dict[timed_msg.msg_id] = MessageLog(self.buffer_size)
+            class_dict[timed_msg.msg_id].addMessage(timed_msg)
             new_msg = True
             
         self.data_updated.emit(sender_id,timed_msg.class_id,timed_msg.msg_id,new_msg)

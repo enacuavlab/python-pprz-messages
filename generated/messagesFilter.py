@@ -39,4 +39,4 @@ class Ui_Form(object):
         _translate = QtCore.QCoreApplication.translate
         Form.setWindowTitle(_translate("Form", "Form"))
         self.pinCheckBox.setText(_translate("Form", "Show only pinned"))
-        self.filterLineEdit.setPlaceholderText(_translate("Form", "Search message/field (regex allowed)"))
+        self.filterLineEdit.setPlaceholderText(_translate("Form", "Search message/id/field (regex allowed)"))
