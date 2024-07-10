@@ -20,40 +20,48 @@
 import typing
 
 from msgRecord.ivyRecorder import IvyRecorder
+from msgRecord.qtMessageModel import IvyModel,FilteredIvyModel
 
 from PyQt5.QtWidgets import QWidget,QMainWindow,QApplication,\
-                            QVBoxLayout,QTabWidget
+                            QVBoxLayout,QTabWidget,QSplitter,QTreeView
                             
 
 from PyQt5.QtCore import Qt,pyqtSlot
 
 from messagesWidget import MessagesWidget
+from pinnedMessagesView import PinnedMessages
 
 
-class MessagesMain(QTabWidget):
+class MessagesMain(QSplitter):
     def __init__(self, ivy:IvyRecorder,parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setOrientation(Qt.Orientation.Vertical)
         
         self.ivyRecorder = ivy
         
-        self.ivyRecorder.new_sender.connect(self.__newSender)
-        self.setTabsClosable(False)
+        self.model = IvyModel(ivy)
+        self.filteredModel = FilteredIvyModel(self.model)
         
-        self.currentChanged.connect(self.__pauseUnfocused)
+        self.addWidget(MessagesWidget(ivy,self.model,self.filteredModel,self))
         
-    @pyqtSlot(int)
-    def __newSender(self,id:int):
-        w = MessagesWidget(self.ivyRecorder,id,self)
-        index = self.addTab(w,f"Id: {id}")
+        self.pinnedModel = FilteredIvyModel(self.model)
+        self.pinnedModel.setCheckedOnly(True)
+        self.pinnedWidget = PinnedMessages(self.pinnedModel,self)
         
-        w.pauseUpdates(index != self.currentIndex())
+        self.setStyleSheet("""
+QSplitter::handle {
+    background-color: #d61a1f;
+    border: 1px solid #777;
+    width: 13px;
+    margin-left: 2px;
+    margin-right: 2px;
+    border-radius: 4px;
+}
+        """)
         
+        self.addWidget(self.pinnedWidget)
         
-    @pyqtSlot(int)
-    def __pauseUnfocused(self,current:int):
-        for t in range(self.count()):
-            msgw:MessagesWidget = self.widget(t)
-            msgw.pauseUpdates(current != t)
+        self.setCollapsible(0,False)
         
 
 
