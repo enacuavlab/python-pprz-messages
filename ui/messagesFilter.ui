@@ -18,11 +18,31 @@
     <widget class="QFrame" name="filterFrame">
      <layout class="QHBoxLayout" name="horizontalLayout">
       <item>
-       <widget class="QCheckBox" name="pinCheckBox">
-        <property name="text">
-         <string>Show only pinned</string>
-        </property>
-       </widget>
+       <layout class="QVBoxLayout" name="verticalLayout">
+        <item>
+         <widget class="QCheckBox" name="multiSenderPinCheckBox">
+          <property name="toolTip">
+           <string>While checked, pinning a message for any sender will attempt to the same message for all other senders.</string>
+          </property>
+          <property name="text">
+           <string>Pin across senders</string>
+          </property>
+          <property name="checked">
+           <bool>true</bool>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QCheckBox" name="pinCheckBox">
+          <property name="toolTip">
+           <string>While active, display only the pinned fields</string>
+          </property>
+          <property name="text">
+           <string>Show only pinned</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
       </item>
       <item>
        <widget class="QLineEdit" name="filterLineEdit">

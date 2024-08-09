@@ -26,7 +26,7 @@ from msgRecord.ivyRecorder import IvyRecorder,MessageLog
 from msgRecord.messageLog import NoMessageError
 
 from PyQt5 import QtCore
-from PyQt5.QtWidgets import QInputDialog
+from PyQt5.QtWidgets import QInputDialog,QMessageBox
 from PyQt5.QtCore import Qt,QObject,QSortFilterProxyModel,QModelIndex,QTimer,pyqtSlot,pyqtSignal
 from PyQt5.QtGui import QColor,QStandardItem,QStandardItemModel
 
@@ -42,6 +42,12 @@ class FieldColumns(enum.IntEnum):
 
 assert len(FieldColumns) <= COLUMN_COUNT
 
+class MessageSubgroupColumns(enum.IntEnum):
+    ROOT = 0
+    VALUE = 1
+    ALT_VALUE = 2
+    
+assert len(MessageSubgroupColumns) <= COLUMN_COUNT
 
 class MessageColumns(enum.IntEnum):
         ROOT = 0
@@ -69,23 +75,40 @@ class FieldItem(QStandardItem):
         super().__init__(name)
         self.setFieldName(name)
         
-    def getSenderId(self) -> int:
-        return self.parent().getSenderId()
+    def senderId(self) -> int:
+        return self.parent().senderId()
         
     def setFieldName(self,name:str):
         self.setData(name,Qt.ItemDataRole.UserRole)
     
-    def getFieldName(self) -> str:
+    def fieldName(self) -> str:
         return self.data(Qt.ItemDataRole.UserRole)
 
-class MessageItem(QStandardItem):
-    def __init__(self,msg:MessageLog):
-        super().__init__(msg.msg_name())
+class MessageSubgroupItem(QStandardItem):
+    def __init__(self,topMsg:MessageLog,fieldName:str,fieldVal):
+        super().__init__(fieldName)
         self.fieldMap:dict[str,int] = dict() # Field_name -> Row_number
-        self.msg = msg
+        self.msg = topMsg
+        self.fieldName = fieldName
+        self.fieldVal = fieldVal
         
-    def getSenderId(self) -> int:
-        return self.parent().getSenderId()
+    
+    def senderId(self) -> int:
+        return self.parent().senderId()
+    
+    def pinMessage(self,msg:MessageLog,field:typing.Optional[str],value):
+        if field is None:
+            self.checkChildren(value)
+        else:
+            try:
+                r = self.fieldMap[field]
+            except KeyError:
+                return
+            
+            fieldItem:FieldItem = self.child(r,0)
+            fieldItem.setData(value,Qt.ItemDataRole.CheckStateRole)
+            
+        self.setCheckFromChildren()
     
     def setCheckFromChildren(self):
         resultState = self.child(0,0).checkState()
@@ -116,7 +139,11 @@ class MessageItem(QStandardItem):
         
     def updateAllFields(self,msg:MessageLog):
         self.msg = msg
+        
         for f in msg.fieldnames():
+            if f == self.fieldName:
+                continue
+            
             self.updateField(msg,f)
     
     def updateField(self,msg:MessageLog,fieldname:str):
@@ -180,7 +207,219 @@ class MessageItem(QStandardItem):
                     altstr += " " + field.alt_unit
                     
                 fieldAltValItem.setText(altstr)
+        
+class MessageItem(QStandardItem):
+    def __init__(self,msg:MessageLog):
+        super().__init__(msg.msg_name())
+        self.fieldMap:dict[str,int] = dict() # Field_name -> Row_number
+        self.msg = msg
+        
+        self.groupedMap:dict = dict() # Value -> Row_number
+        
+    def hasSubgroups(self) -> bool:
+        return self.msg.grouped()
+        
+    def senderId(self) -> int:
+        return self.parent().senderId()
+    
+    def pinMessage(self,msg:MessageLog,field:typing.Optional[str],value):
+        if field is None:
+            self.checkChildren(value)
+        else:
+            try:
+                r = self.fieldMap[field]
+            except KeyError:
+                return
             
+            fieldItem:FieldItem = self.child(r,0)
+            fieldItem.setData(value,Qt.ItemDataRole.CheckStateRole)
+            
+        self.setCheckFromChildren()
+    
+    def setCheckFromChildren(self):
+        resultState = self.child(0,0).checkState()
+        
+        for i in range(1,self.rowCount()):
+            pinItem = self.child(i,0)
+            s = pinItem.checkState()
+            if s != resultState:
+                self.setCheckState(Qt.CheckState.PartiallyChecked)
+                return
+        
+        self.setCheckState(resultState)
+    
+    def checkChildren(self,checked:typing.Optional[typing.Union[bool,Qt.CheckState]]=None):
+        if checked is None:
+            checked = self.checkState()
+            
+        if checked == Qt.CheckState.PartiallyChecked:
+            return
+            
+        if isinstance(checked,bool):
+            checked = Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked
+            
+            
+        for i in range(self.rowCount()):
+            pinItem = self.child(i,0)
+            pinItem.setCheckState(checked)
+        
+    def toSubgroups(self,fieldName:str):
+        rowCount = self.rowCount()
+        self.removeRows(0,rowCount)
+        
+        self.fieldMap.clear()
+        self.groupedMap.clear()
+
+        self.msg.groupBy(fieldName)
+
+    
+    def clearSubgroups(self):
+        rowCount = self.rowCount()
+        self.removeRows(0,rowCount)
+        
+        self.fieldMap.clear()
+        self.groupedMap.clear()
+
+        self.msg.clearGroupBy()
+
+        
+    def updateAllFields(self,msg:MessageLog):
+        self.msg = msg
+
+        if self.hasSubgroups():
+            for v,m in self.msg.subgroups().items():
+                self.updateSubgroup(m,v)
+                
+        else:
+            for f in msg.fieldnames():
+                self.updateField(msg,f)
+        
+    def updateSubgroup(self,submsg:MessageLog,val):
+        field = self.msg.get_full_field(self.msg.groupedBy())
+        
+        try:
+            rowNumber = self.groupedMap[val]
+            
+            submsgRootItem:MessageSubgroupItem = self.child(rowNumber,MessageSubgroupColumns.ROOT)
+            submsgValueItem = self.child(rowNumber,MessageSubgroupColumns.VALUE)
+            submsgAltValItem = self.child(rowNumber,MessageSubgroupColumns.ALT_VALUE)
+        except KeyError:
+            self.groupedMap[val] = self.rowCount()
+    
+            submsgRootItem = MessageSubgroupItem(self.msg,self.msg.groupedBy(),val)
+            
+            submsgRootItem.setText(f"({field.typestr}) {field.name}")
+            submsgRootItem.setCheckable(True)
+            submsgRootItem.setEditable(False)
+            submsgRootItem.setData(field.name,Qt.ItemDataRole.UserRole)
+            
+            submsgValueItem = QStandardItem()
+            submsgValueItem.setEditable(False)
+            
+            submsgAltValItem = QStandardItem()
+            submsgAltValItem.setEditable(False)
+            
+            newitems = [None] * COLUMN_COUNT
+            newitems[MessageSubgroupColumns.ROOT] = submsgRootItem
+            newitems[MessageSubgroupColumns.VALUE] = submsgValueItem
+            newitems[MessageSubgroupColumns.ALT_VALUE] = submsgAltValItem
+            
+            self.appendRow(newitems)
+            
+        submsgValueItem.setData(val,Qt.ItemDataRole.UserRole)
+            
+        if field.format and '%' in field.format:
+            valstr = field.format % val
+        else:
+            valstr = str(val)
+        
+        if field.unit and field.unit != 'none':
+            valstr += " " + field.unit
+        
+        if field.is_enum:
+            valstr += f" ({field.val_enum})"
+        
+        submsgValueItem.setText(valstr)
+                    
+        if val is not None and not(field.array_type):
+            alt_coef = 1. if field.alt_unit_coef is None else field.alt_unit_coef
+            
+            submsgAltValItem.setData(alt_coef * val,Qt.ItemDataRole.UserRole)
+            submsgAltValItem.setData(alt_coef,Qt.ItemDataRole.UserRole+1)
+            
+            if field.alt_unit_coef != 1. and field.alt_unit_coef != None:
+                altstr = f"{val * field.alt_unit_coef:.3f}"
+                
+                if field.alt_unit:
+                    altstr += " " + field.alt_unit
+                    
+                submsgAltValItem.setText(altstr)
+                
+        submsgRootItem.updateAllFields(submsg)
+                
+
+    
+    def updateField(self,msg:MessageLog,fieldname:str):
+        self.msg = msg
+        field = msg.get_full_field(fieldname)
+        
+        try:
+            rowNumber = self.fieldMap[fieldname]
+            
+            fieldRootItem:FieldItem = self.child(rowNumber,FieldColumns.ROOT)
+            fieldValueItem = self.child(rowNumber,FieldColumns.VALUE)
+            fieldAltValItem = self.child(rowNumber,FieldColumns.ALT_VALUE)
+        except KeyError:
+            self.fieldMap[fieldname] = self.rowCount()
+    
+            fieldRootItem = FieldItem(field.name)
+            fieldRootItem.setText(f"({field.typestr}) {field.name}")
+            fieldRootItem.setCheckable(True)
+            fieldRootItem.setEditable(False)
+            fieldRootItem.setData(field.name,Qt.ItemDataRole.UserRole)
+            
+            fieldValueItem = QStandardItem()
+            fieldValueItem.setEditable(False)
+            
+            fieldAltValItem = QStandardItem()
+            fieldAltValItem.setEditable(False)
+            
+            newitems = [None] * COLUMN_COUNT
+            newitems[FieldColumns.ROOT] = fieldRootItem
+            newitems[FieldColumns.VALUE] = fieldValueItem
+            newitems[FieldColumns.ALT_VALUE] = fieldAltValItem
+            
+            self.appendRow(newitems)
+            
+        
+        fieldValueItem.setData(field.val,Qt.ItemDataRole.UserRole)
+            
+        if field.format and '%' in field.format:
+            valstr = field.format % field.val
+        else:
+            valstr = str(field.val)
+        
+        if field.unit and field.unit != 'none':
+            valstr += " " + field.unit
+        
+        if field.is_enum:
+            valstr += f" ({field.val_enum})"
+        
+        fieldValueItem.setText(valstr)
+                    
+        if field.val is not None and not(field.array_type):
+            alt_coef = 1. if field.alt_unit_coef is None else field.alt_unit_coef
+            
+            fieldAltValItem.setData(alt_coef * field.val,Qt.ItemDataRole.UserRole)
+            fieldAltValItem.setData(alt_coef,Qt.ItemDataRole.UserRole+1)
+            
+            if field.alt_unit_coef != 1. and field.alt_unit_coef != None:
+                altstr = f"{field.val * field.alt_unit_coef:.3f}"
+                
+                if field.alt_unit:
+                    altstr += " " + field.alt_unit
+                    
+                fieldAltValItem.setText(altstr)
 
 class MessageClassItem(QStandardItem):
     COLOR_FREQ = True
@@ -190,8 +429,19 @@ class MessageClassItem(QStandardItem):
         super().__init__(name)
         self.messagesMap:dict[int,int] = dict() # Message_id -> Row_number
         
-    def getSenderId(self) -> int:
-        return self.parent().getSenderId()
+    def senderId(self) -> int:
+        return self.parent().senderId()
+    
+    def pinMessage(self,msg:MessageLog,field:typing.Optional[str],value):
+        try:
+            r = self.messagesMap[msg.msg_id()]
+        except KeyError:
+            return
+        
+        msgItem:MessageItem = self.child(r,0)
+        msgItem.pinMessage(msg,field,value)
+        
+        
         
     def updateMessage(self,msg:MessageLog):
         id = msg.msg_id()
@@ -219,6 +469,7 @@ class MessageClassItem(QStandardItem):
             msgRootItem.setCheckable(True)
             msgRootItem.setAutoTristate(True)
             msgRootItem.setCheckState(Qt.CheckState.Unchecked)
+            msgRootItem.setData(msg.msg_name(),Qt.ItemDataRole.UserRole)
             # msgItem.setIcon(self.model().pinIcon)            
             
             msgIdItem = QStandardItem(str(id))
@@ -283,7 +534,7 @@ class SenderItem(QStandardItem):
     def setSenderId(self,id:int):
         self.setData(id,Qt.ItemDataRole.UserRole)
         
-    def getSenderId(self) -> int:
+    def senderId(self) -> int:
         return self.data(Qt.ItemDataRole.UserRole)
         
     def updateMessage(self,msg:MessageLog):
@@ -310,9 +561,18 @@ class SenderItem(QStandardItem):
             
         clsRootItem.updateMessage(msg)
         
+    def pinMessage(self,msg:MessageLog,field:typing.Optional[str],value):
+        try:
+            r = self.classMap[msg.class_id()]
+        except KeyError:
+            return
+        
+        msgClassItem:MessageClassItem = self.child(r,0)
+        msgClassItem.pinMessage(msg,field,value)
+        
         
     def updateMessageClass(self,ivy:IvyRecorder,class_id:int):
-        senderId = self.getSenderId()
+        senderId = self.senderId()
         try:
             msgDict = ivy.records[senderId][class_id]
         except KeyError:
@@ -345,6 +605,14 @@ class IvyModel(QStandardItemModel):
         
         self.timer.start(500)
         
+        self.__multiSenderPinning:bool = False # Allow pinning accross all different senders
+        
+    def multiSenderPinning(self) -> bool:
+        return self.__multiSenderPinning
+        
+    def setMultiSenderPinning(self,b:bool):
+        self.__multiSenderPinning = b
+        
     
     ############### MIME aspects (Drag N Drop) ###############
     
@@ -360,7 +628,7 @@ class IvyModel(QStandardItemModel):
             return None
         
         elif isinstance(rootItem,MessageItem):
-            sender = rootItem.getSenderId()
+            sender = rootItem.senderId()
             class_name = rootItem.msg.msg_class()
             msg_name = rootItem.msg.msg_name()
             
@@ -369,10 +637,10 @@ class IvyModel(QStandardItemModel):
         elif isinstance(rootItem,FieldItem):
             parent:MessageItem
             
-            sender = parent.getSenderId()
+            sender = parent.senderId()
             class_name = parent.msg.msg_class()
             msg_name = parent.msg.msg_name()
-            field_name = rootItem.getFieldName()
+            field_name = rootItem.fieldName()
             
             field = parent.msg.get_full_field(field_name)
             field_type = field.typestr
@@ -400,7 +668,7 @@ class IvyModel(QStandardItemModel):
         
         else:
             return None
-    
+        
     def mimeData(self, indexes: typing.Iterable[QModelIndex]) -> QtCore.QMimeData:
         data = QtCore.QMimeData()
         
@@ -414,21 +682,41 @@ class IvyModel(QStandardItemModel):
                
         return data    
     
+    ############### setData (modified for pinning) ###############
+    
     def setData(self, index: QModelIndex, value: typing.Any, role: int = ...) -> bool:
         ret = super().setData(index, value, role)
         
         item = self.itemFromIndex(index)
         parent = item.parent()
         if role == Qt.ItemDataRole.CheckStateRole:
+            msg = None
+            field = None 
             if isinstance(item,MessageItem):
                 item.checkChildren(value)
+                msg = item.msg
             elif isinstance(parent,MessageItem):
                 parent.setCheckFromChildren()
+                msg = parent.msg
+                field = item.fieldName()
+                
+            self.newPin.emit(item.senderId(),msg.class_id(),msg.msg_id(),"" if field is None else field, value)
+                
+            if self.multiSenderPinning() and msg is not None:
+                self.multiPin(item.senderId(),msg,field,value)    
                 
                 
         return ret
     
-    
+    def multiPin(self,senderId:int,msg:MessageLog,field:typing.Optional[str],value):
+        for i,r in self.senderMap.items():
+            if i == senderId:
+                continue
+            
+            senderItem:SenderItem = self.item(r,0)
+            senderItem.pinMessage(msg,field,value)
+            
+            
     def pauseUpdates(self,b:bool):
         if b:
             self.timer.stop()
@@ -473,7 +761,7 @@ class FilteredIvyModel(QSortFilterProxyModel):
         
         self.__checkedOnly = False
     
-    def getSenderIndex(self,senderId:int) -> QModelIndex:
+    def senderIndex(self,senderId:int) -> QModelIndex:
         ivyModel:IvyModel = self.sourceModel()
         ivyIndex = ivyModel.index(ivyModel.senderMap[senderId],0)
         return self.mapFromSource(ivyIndex)
@@ -495,7 +783,10 @@ class FilteredIvyModel(QSortFilterProxyModel):
     def setCheckedOnly(self,b:bool):
         self.__checkedOnly = b
         self.invalidateFilter()
-                
+    
+    def itemFromIndex(self, index:QModelIndex) -> QStandardItem:
+        return self.sourceModel().itemFromIndex(self.mapToSource(index))
+    
     def filterAcceptsRow(self, source_row: int, source_parent: QModelIndex) -> bool:
         firstIndex = source_parent.child(source_row,0)
         model:IvyModel = self.sourceModel()
@@ -530,7 +821,7 @@ class FilteredIvyModel(QSortFilterProxyModel):
                         break
             
         elif isinstance(item,FieldItem):
-            fieldName = item.getFieldName()
+            fieldName = item.fieldName()
             regex_result = regex.match(fieldName).hasMatch()
             
             

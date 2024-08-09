@@ -25,6 +25,7 @@ class MessagesFilter(QWidget):
     
     filteringChanged = pyqtSignal(str) # Current text for filtering
     pinFiltering = pyqtSignal(bool) # Are we keeping only pinned messages ?
+    multiSenderPin = pyqtSignal(bool) # Pinning across all senders
     filteringDone = pyqtSignal()
     
     def __init__(self, parent: QWidget | None = None, flags: Qt.WindowFlags | Qt.WindowType = Qt.WindowType.Widget) -> None:
@@ -39,8 +40,18 @@ class MessagesFilter(QWidget):
             lambda t : self.pinFiltering.emit(True if t == Qt.CheckState.Checked else False)
         )
         
+        self.ui.multiSenderPinCheckBox.stateChanged.connect(
+            lambda t : self.multiSenderPin.emit(True if t == Qt.CheckState.Checked else False)
+        )
+        
     def __emitNewFilter(self):
         self.filteringChanged.emit(self.ui.filterLineEdit.text())
+    
+    def pinFilter(self) -> Qt.CheckState:
+        return self.ui.pinCheckBox.checkState()
+    
+    def multiSenderPinning(self) -> Qt.CheckState:
+        return self.ui.multiSenderPinCheckBox.checkState()
 
 
 if __name__ == "__main__":

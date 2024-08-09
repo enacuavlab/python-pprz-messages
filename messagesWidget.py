@@ -17,16 +17,16 @@
 
 import pathlib
 
-from msgRecord.ivyRecorder import IvyRecorder
+from msgRecord.ivyRecorder import IvyRecorder,MessageLog
 from msgRecord.qtMessageModel import FilteredIvyModel,IvyModel,\
-                                        FieldItem,SenderItem,MessageItem,MessageClassItem
+                                        FieldItem,SenderItem,MessageItem,MessageClassItem,MessageSubgroupItem
 
 
 from PyQt5.QtWidgets import QWidget,QApplication,\
                             QSizePolicy,QHeaderView,\
-                            QTreeView,QVBoxLayout,QWidget,QTabWidget
+                            QTreeView,QVBoxLayout,QWidget,QTabWidget,QMenu,QMessageBox
 
-from PyQt5.QtCore import Qt,QModelIndex,pyqtSlot
+from PyQt5.QtCore import Qt,QModelIndex,pyqtSlot,QPoint
 
 
 from messagesFilter import MessagesFilter
@@ -37,6 +37,8 @@ class MessagesView(QTreeView):
                 
         self.ivyModel = ivyModel
         
+        self.contextMenu = QMenu()
+        
         self.setModel(self.ivyModel)
         
         self.setSortingEnabled(True)
@@ -46,11 +48,12 @@ class MessagesView(QTreeView):
         self.sizePolicy().setHorizontalPolicy(QSizePolicy.Policy.Minimum)
         self.sizePolicy().setVerticalPolicy(QSizePolicy.Policy.Minimum)
         self.header().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
-        
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.setWordWrap(False)
         
         self.doubleClicked.connect(self.__expandAllOnDoubleClick)
-        self.model().rowsInserted.connect(self.__autoExpandTopItems)
+        self.model().rowsInserted.connect(self._autoExpandTopItems)
+        self.customContextMenuRequested.connect(self._onCustomContextMenu)
         
         self.setSelectionBehavior(QTreeView.SelectionBehavior.SelectRows)
         self.setSelectionMode(QTreeView.SelectionMode.SingleSelection)
@@ -99,23 +102,95 @@ QTreeView::branch:open:has-children:has-siblings  {
                             """.replace('url(:',f'url({localdir}')
                         
         self.setStyleSheet(style)
+        
+    @pyqtSlot(QPoint)
+    def _onCustomContextMenu(self,point:QPoint):
+        index = self.indexAt(point)
+        if not(index.isValid()):
+            return
+        
+        rootIndex = index.sibling(index.row(),0)
+        item = self.model().itemFromIndex(rootIndex)
+        
+        def gen_cb(item:MessageItem,fstr:str):
+            msg = item.msg
+            field = msg.get_full_field(fstr)
+            if not('int8' in field.typestr or 'char' in field.typestr):                    
+                return lambda: (item.toSubgroups(fstr) if QMessageBox.warning(self,'Confirm message grouping',
+                        f"The field '{field.name}' in message '{msg.msg_name()}' is of type '{field.typestr}', which is likely to have a lot of different values. Are you sure you want to proceed ?",
+                        QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Yes,
+                        QMessageBox.StandardButton.Cancel) == QMessageBox.StandardButton.Yes else None)
+            else:
+                return lambda: item.toSubgroups(fstr)
+        
+        menu = QMenu(self)
+        if isinstance(item,FieldItem):
+            parentItem = item.parent()
+            
+            if isinstance(parentItem,MessageItem):
+                field = parentItem.msg.get_full_field(item.fieldName())
+                if field.array_type:
+                    return
+                
+                menu.addAction(f"Group {parentItem.msg.msg_name()} by {item.fieldName()}").triggered.connect(gen_cb(parentItem,item.fieldName()))
+            else:
+                menu.addAction("Clear grouping").triggered.connect(parentItem.parent().clearSubgroups)
+                
+                
+
+        elif isinstance(item,MessageItem):
+            if item.hasSubgroups():
+                menu.addAction("Clear grouping").triggered.connect(item.clearSubgroups)
+            else:
+                submenu = menu.addMenu(f"Group by field:")
+                
+                for f in item.fieldMap.keys():
+                    field = item.msg.get_full_field(f)
+                    if field.array_type:
+                        continue
+                    
+                    act = submenu.addAction(f)
+                    act.triggered.connect(lambda: self.collapse(rootIndex))
+                    act.triggered.connect(gen_cb(item,f))
+                    act.triggered.connect(lambda: self.expand(rootIndex))
+                    
+
+        elif isinstance(item,MessageSubgroupItem):
+            parentItem = item.parent()
+            menu.addAction("Clear grouping").triggered.connect(parentItem.clearSubgroups)
+
+        elif isinstance(item,MessageClassItem):
+            return
+        elif isinstance(item,SenderItem):
+            return
+        
+        menu.popup(self.viewport().mapToGlobal(point))
+
           
     @pyqtSlot(QModelIndex)
     def __expandAllOnDoubleClick(self,index:QModelIndex):
-        rootIndex =  index.sibling(index.row(),0)
+        if index.column() == 0:
+            rootIndex = index
+        else:
+            rootIndex = index.sibling(index.row(),0)
+            
+        print(rootIndex.row(),rootIndex.column())
         if self.isExpanded(rootIndex):
             self.collapse(rootIndex)
         else:
             self.expand(rootIndex)
             
     @pyqtSlot(QModelIndex,int,int)
-    def __autoExpandTopItems(self,parent:QModelIndex,start:int,stop:int):
+    def _autoExpandTopItems(self,parent:QModelIndex,start:int,stop:int):
         if not(parent.isValid()):
             return
-        
-        if not(parent.parent().isValid()):
+        else:
+            index = parent.child(start,0)
             if not(self.isExpanded(parent)):
                 self.expand(parent)
+            
+            if not(self.isExpanded(index)):
+                self.expand(index)
     
     
 class SenderMessagesView(MessagesView):
@@ -124,14 +199,22 @@ class SenderMessagesView(MessagesView):
         
         self.senderId = sender_id
 
-        
-        self.setRootIndex(self.ivyModel.getSenderIndex(sender_id))
+        self.setRootIndex(self.ivyModel.senderIndex(sender_id))
         
         
     @pyqtSlot()
     def safeExpandAll(self):
         if self.model().messageCount(self.senderId) < 5:
             self.expandAll()
+            
+    @pyqtSlot(QModelIndex,int,int)
+    def _autoExpandTopItems(self,parent:QModelIndex,start:int,stop:int):
+        if not(parent.isValid()):
+            return
+        
+        if not(parent.parent().isValid()):
+            if not(self.isExpanded(parent)):
+                self.expand(parent)
 
 
 
@@ -143,7 +226,9 @@ class MessagesWidget(QWidget):
         
         self.ivy = ivy
         self.model = ivyModel
+        self.model.setMultiSenderPinning(True if self.filterWidget.multiSenderPinning() == Qt.CheckState.Checked else False)
         self.filteredModel = filteredModel
+        
         
         self.tabWidget = QTabWidget(self)
         self.tabWidget.setTabsClosable(False)
@@ -156,6 +241,13 @@ class MessagesWidget(QWidget):
         
         self.ivy.new_sender.connect(self.newSender)
         
+        self.filterWidget.filteringChanged.connect(filteredModel.setFilterRegularExpression)
+
+        self.filterWidget.pinFiltering.connect(filteredModel.setCheckedOnly)
+        
+        self.filterWidget.multiSenderPin.connect(ivyModel.setMultiSenderPinning)
+
+        
     @pyqtSlot(int)
     def newSender(self,id:int):
         self.ivy.recordSender(id)
@@ -163,10 +255,7 @@ class MessagesWidget(QWidget):
         
         newView = SenderMessagesView(self.filteredModel,id,self)
         
-        self.filterWidget.filteringChanged.connect(newView.ivyModel.setFilterRegularExpression)
         self.filterWidget.filteringDone.connect(newView.safeExpandAll)
-        
-        self.filterWidget.pinFiltering.connect(newView.ivyModel.setCheckedOnly)
         
         self.tabWidget.addTab(newView,f"Sender {id}")
 

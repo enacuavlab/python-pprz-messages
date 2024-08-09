@@ -62,6 +62,22 @@ QSplitter::handle {
         self.addWidget(self.pinnedWidget)
         
         self.setCollapsible(0,False)
+        ss = self.sizes()
+        ss[-1] = 0
+        self.setSizes(ss)
+        
+        self.showPinnedOnce = False
+        
+        self.model.newPin.connect(self.showPinned)
+        
+    def showPinned(self,*args):
+        if not(self.showPinnedOnce):
+            self.showPinnedOnce = True
+            ss = self.sizes()
+            if ss[-1] == 0:
+                ss[0] = ss[0]//2
+                ss[-1] = ss[0]
+            self.setSizes(ss)
         
 
 

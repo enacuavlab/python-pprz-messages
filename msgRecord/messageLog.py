@@ -79,11 +79,46 @@ class NoMessageError(Exception):
     def __init__(self, *args: object) -> None:
         super().__init__("No messages in this log")
 
+class GroupByError(Exception):
+    pass
+
 class MessageLog():
     def __init__(self,size:int=10):
         self.queue:typing.Deque[TimedPprzMessage] = deque(maxlen=size)
         self.period:typing.Optional[float] = None 
         
+        self.__groupBy:typing.Optional[str] = None
+        self.__groups:dict[typing.Any,MessageLog] = dict()
+    
+    def grouped(self) -> bool:
+        return not(self.__groupBy is None)
+    
+    def groupedBy(self) -> typing.Optional[str]:
+        return self.__groupBy
+    
+    def groupBy(self,s:typing.Optional[str]):
+        if s != self.__groupBy:
+            self.__groups.clear()
+        
+        if s is not None:
+            field = self.get_full_field(s)
+            if field.array_type:
+                raise GroupByError("Cannot group by an array type")
+            
+        self.__groupBy = s
+    
+    def clearGroupBy(self):
+        self.groupBy(None)
+    
+    def subgroup(self,val):
+        try:
+            return self.__groups[val]
+        except KeyError:
+            return None
+        
+    def subgroups(self):
+        return self.__groups
+                 
     def addMessage(self,msg:TimedPprzMessage):
         if len(self.queue) > 0:
             if self.period is None:
@@ -93,6 +128,16 @@ class MessageLog():
         
         self.queue.appendleft(msg)
         
+        if self.__groupBy is not None:
+            field = msg.get_full_field(self.__groupBy)
+            try:
+                sublog = self.__groups[field.val]
+            except KeyError:
+                sublog = MessageLog(self.queue.maxlen)
+                self.__groups[field.val] = sublog
+            sublog.addMessage(msg)
+                
+        
     def addMessages(self,msgs:typing.Iterable[TimedPprzMessage]):
         sorted_msgs = sorted(msgs)
         if self.period is None:
@@ -100,7 +145,17 @@ class MessageLog():
         else:
             self.period = ((sorted_msgs[-1] - sorted_msgs[0])/len(sorted_msgs) + self.period)/2
         self.queue.extendleft(sorted_msgs)
-    
+        
+        if self.__groupBy is not None:
+            for m in msgs:
+                field = m.get_full_field(self.__groupBy)
+                try:
+                    sublog = self.__groups[field.val]
+                except KeyError:
+                    sublog = MessageLog(self.queue.maxlen)
+                    self.__groups[field.val] = sublog
+                    
+                sublog.addMessage(m)
     def newest(self) -> TimedPprzMessage:
         try:
             return self.queue[0]
