@@ -170,11 +170,10 @@ QTreeView::branch:open:has-children:has-siblings  {
     @pyqtSlot(QModelIndex)
     def __expandAllOnDoubleClick(self,index:QModelIndex):
         if index.column() == 0:
-            rootIndex = index
-        else:
-            rootIndex = index.sibling(index.row(),0)
+            self.__expandAllOnDoubleClick(index.sibling(index.row(),1))
+        
+        rootIndex = index.sibling(index.row(),0)
             
-        print(rootIndex.row(),rootIndex.column())
         if self.isExpanded(rootIndex):
             self.collapse(rootIndex)
         else:
