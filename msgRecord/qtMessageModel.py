@@ -18,7 +18,6 @@
 import typing
 import time
 import math
-import os,pathlib
 
 import enum
 
@@ -272,6 +271,9 @@ class MessageItem(QStandardItem):
 
         self.msg.groupBy(fieldName)
 
+        m:IvyModel =self.model()
+        m.updateTimes()
+
     
     def clearSubgroups(self):
         rowCount = self.rowCount()
@@ -281,6 +283,9 @@ class MessageItem(QStandardItem):
         self.groupedMap.clear()
 
         self.msg.clearGroupBy()
+
+        m:IvyModel =self.model()
+        m.updateTimes()
 
         
     def updateAllFields(self,msg:MessageLog):
@@ -760,6 +765,8 @@ class FilteredIvyModel(QSortFilterProxyModel):
         self.setSortRole(Qt.ItemDataRole.UserRole)
         
         self.__checkedOnly = False
+        
+        ivyModel.dataChanged.connect(lambda tl,br,r : self.dataChanged.emit(self.mapFromSource(tl),self.mapFromSource(br),r))
     
     def senderIndex(self,senderId:int) -> QModelIndex:
         ivyModel:IvyModel = self.sourceModel()

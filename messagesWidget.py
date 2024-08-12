@@ -115,7 +115,7 @@ QTreeView::branch:open:has-children:has-siblings  {
         def gen_cb(item:MessageItem,fstr:str):
             msg = item.msg
             field = msg.get_full_field(fstr)
-            if not('int8' in field.typestr or 'char' in field.typestr):                    
+            if not('int8' in field.typestr or 'char' in field.typestr):      
                 return lambda: (item.toSubgroups(fstr) if QMessageBox.warning(self,'Confirm message grouping',
                         f"The field '{field.name}' in message '{msg.msg_name()}' is of type '{field.typestr}', which is likely to have a lot of different values. Are you sure you want to proceed ?",
                         QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Yes,
@@ -134,13 +134,16 @@ QTreeView::branch:open:has-children:has-siblings  {
                 
                 menu.addAction(f"Group {parentItem.msg.msg_name()} by {item.fieldName()}").triggered.connect(gen_cb(parentItem,item.fieldName()))
             else:
-                menu.addAction("Clear grouping").triggered.connect(parentItem.parent().clearSubgroups)
+                act = menu.addAction("Clear grouping")
+                msgitem = parentItem.parent()
+                act.triggered.connect(msgitem.clearSubgroups)
                 
                 
 
         elif isinstance(item,MessageItem):
             if item.hasSubgroups():
-                menu.addAction("Clear grouping").triggered.connect(item.clearSubgroups)
+                act = menu.addAction("Clear grouping")
+                act.triggered.connect(item.clearSubgroups)
             else:
                 submenu = menu.addMenu(f"Group by field:")
                 
@@ -150,14 +153,13 @@ QTreeView::branch:open:has-children:has-siblings  {
                         continue
                     
                     act = submenu.addAction(f)
-                    act.triggered.connect(lambda: self.collapse(rootIndex))
                     act.triggered.connect(gen_cb(item,f))
-                    act.triggered.connect(lambda: self.expand(rootIndex))
                     
 
         elif isinstance(item,MessageSubgroupItem):
             parentItem = item.parent()
-            menu.addAction("Clear grouping").triggered.connect(parentItem.clearSubgroups)
+            act = menu.addAction("Clear grouping")
+            act.triggered.connect(parentItem.clearSubgroups)
 
         elif isinstance(item,MessageClassItem):
             return

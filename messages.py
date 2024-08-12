@@ -87,8 +87,8 @@ if __name__ == "__main__":
     app.setApplicationName("messages")
     
     ivy = IvyRecorder(buffer_size=1)
-            
-    window = MessagesMain(ivy,None)
+    window = QMainWindow()
+    window.setCentralWidget(MessagesMain(ivy,window))
     window.setWindowTitle("Paparazzi link Messages")
     
     app.aboutToQuit.connect(ivy.stop)
