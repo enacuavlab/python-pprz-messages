@@ -233,6 +233,7 @@ class MessagesWidget(QWidget):
         
         self.tabWidget = QTabWidget(self)
         self.tabWidget.setTabsClosable(False)
+        self.tabWidget.tabBar().setMovable(True)
         
         self.vLayout =  QVBoxLayout(self)
         self.vLayout.addWidget(self.filterWidget)
@@ -252,7 +253,7 @@ class MessagesWidget(QWidget):
     @pyqtSlot(int)
     def newSender(self,id:int):
         self.ivy.recordSender(id)
-        self.model.updateTimes()
+        self.model.update()
         
         newView = SenderMessagesView(self.filteredModel,id,self)
         

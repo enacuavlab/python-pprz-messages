@@ -221,7 +221,7 @@ class MessageItem(QStandardItem):
     def senderId(self) -> int:
         return self.parent().senderId()
     
-    def pinMessage(self,msg:MessageLog,field:typing.Optional[str],value):
+    def pinMessage(self,msg:MessageLog,field:typing.Optional[str],value) -> QModelIndex:
         if field is None:
             self.checkChildren(value)
         else:
@@ -234,6 +234,8 @@ class MessageItem(QStandardItem):
             fieldItem.setData(value,Qt.ItemDataRole.CheckStateRole)
             
         self.setCheckFromChildren()
+        
+        return self.index()
     
     def setCheckFromChildren(self):
         resultState = self.child(0,0).checkState()
@@ -272,7 +274,7 @@ class MessageItem(QStandardItem):
         self.msg.groupBy(fieldName)
 
         m:IvyModel =self.model()
-        m.updateTimes()
+        m.update()
 
     
     def clearSubgroups(self):
@@ -285,7 +287,7 @@ class MessageItem(QStandardItem):
         self.msg.clearGroupBy()
 
         m:IvyModel =self.model()
-        m.updateTimes()
+        m.update()
 
         
     def updateAllFields(self,msg:MessageLog):
@@ -437,14 +439,14 @@ class MessageClassItem(QStandardItem):
     def senderId(self) -> int:
         return self.parent().senderId()
     
-    def pinMessage(self,msg:MessageLog,field:typing.Optional[str],value):
+    def pinMessage(self,msg:MessageLog,field:typing.Optional[str],value) -> QModelIndex:
         try:
             r = self.messagesMap[msg.msg_id()]
         except KeyError:
             return
         
         msgItem:MessageItem = self.child(r,0)
-        msgItem.pinMessage(msg,field,value)
+        return msgItem.pinMessage(msg,field,value)
         
         
         
@@ -561,19 +563,20 @@ class SenderItem(QStandardItem):
             
             for i in newItems:
                 i.setEditable(False)
+                i.setDragEnabled(False)
             
             self.appendRow(newItems)
             
         clsRootItem.updateMessage(msg)
         
-    def pinMessage(self,msg:MessageLog,field:typing.Optional[str],value):
+    def pinMessage(self,msg:MessageLog,field:typing.Optional[str],value) -> QModelIndex:
         try:
             r = self.classMap[msg.class_id()]
         except KeyError:
             return
         
         msgClassItem:MessageClassItem = self.child(r,0)
-        msgClassItem.pinMessage(msg,field,value)
+        return msgClassItem.pinMessage(msg,field,value)
         
         
     def updateMessageClass(self,ivy:IvyRecorder,class_id:int):
@@ -592,11 +595,11 @@ class SenderItem(QStandardItem):
 class IvyModel(QStandardItemModel):
     _COLS = enum.IntEnum('MessagesModelHeader',["Class"],start=0)
     newPin = pyqtSignal(int,int,int,str,bool)
+    multiPinningDone = pyqtSignal()
     
     def __init__(self,ivy_recorder:IvyRecorder, parent: typing.Optional[QObject] = None):
         super().__init__(parent)
-        
-        
+                
         self.setHorizontalHeaderLabels(["Name","Id/Value","Time/Alt Value"])
         
         self.ivyRecorder = ivy_recorder
@@ -606,9 +609,11 @@ class IvyModel(QStandardItemModel):
         # self.ivyRecorder.data_updated.connect(self.updateModel)
         
         self.timer = QTimer()
-        self.timer.timeout.connect(self.updateTimes)
+        self.timer.timeout.connect(self.update)
         
-        self.timer.start(500)
+        self.timerDt = 500 # Time between updates, in ms
+        
+        self.timer.start(self.timerDt) 
         
         self.__multiSenderPinning:bool = False # Allow pinning accross all different senders
         
@@ -618,13 +623,16 @@ class IvyModel(QStandardItemModel):
     def setMultiSenderPinning(self,b:bool):
         self.__multiSenderPinning = b
         
+    def supportedDropActions(self) -> Qt.DropActions:
+        return Qt.DropAction.CopyAction
+        
     
     ############### MIME aspects (Drag N Drop) ###############
     
     def mimeTypes(self) -> typing.List[str]:
         return ["text/plain"]
     
-    def __mimeStrFromIndex(self,index:QModelIndex) -> typing.Optional[bytes]:
+    def __mimeStrFromIndex(self,index:QModelIndex) -> typing.Union[str,None,bool]:        
         item = self.itemFromIndex(index)
         parent = item.parent()
         rootItem = parent.child(item.row(),0)
@@ -637,7 +645,7 @@ class IvyModel(QStandardItemModel):
             class_name = rootItem.msg.msg_class()
             msg_name = rootItem.msg.msg_name()
             
-            return f"{sender}:{class_name}:{msg_name}".encode()
+            return f"{sender}:{class_name}:{msg_name}"
             
         elif isinstance(rootItem,FieldItem):
             parent:MessageItem
@@ -659,7 +667,7 @@ class IvyModel(QStandardItemModel):
                                                    text=f"0-{array_len-1}",
                                                    inputMethodHints=Qt.InputMethodHint.ImhFormattedNumbersOnly)
                 if not(ok):
-                    return None
+                    return False
             else:
                 array_range = None
             
@@ -667,9 +675,9 @@ class IvyModel(QStandardItemModel):
                 field_scale = 1.
             
             if array_range is None:
-                return f"{sender}:{class_name}:{msg_name}:{field_name}:{field_scale}".encode()
+                return f"{sender}:{class_name}:{msg_name}:{field_name}:{field_scale}"
             else:
-                return f"{sender}:{class_name}:{msg_name}:{field_name}[{array_range}]:{field_scale}".encode()
+                return f"{sender}:{class_name}:{msg_name}:{field_name}[{array_range}]:{field_scale}"
         
         else:
             return None
@@ -679,12 +687,13 @@ class IvyModel(QStandardItemModel):
         
         for index in indexes:
             if index.isValid():
-                encoded_data = self.__mimeStrFromIndex(index)
-                if encoded_data is not None:
-                    data.setData("text/plain",encoded_data)
+                str_data = self.__mimeStrFromIndex(index)
+                if str_data is not None:
+                    if str_data is False:
+                        return
+                    data.setText(str_data)
                     break
-                
-               
+        
         return data    
     
     ############### setData (modified for pinning) ###############
@@ -708,18 +717,18 @@ class IvyModel(QStandardItemModel):
             self.newPin.emit(item.senderId(),msg.class_id(),msg.msg_id(),"" if field is None else field, value)
                 
             if self.multiSenderPinning() and msg is not None:
-                self.multiPin(item.senderId(),msg,field,value)    
+                self.multiPin(item.senderId(),msg,field,value)
+                self.multiPinningDone.emit()
                 
                 
         return ret
     
     def multiPin(self,senderId:int,msg:MessageLog,field:typing.Optional[str],value):
-        for i,r in self.senderMap.items():
-            if i == senderId:
-                continue
-            
-            senderItem:SenderItem = self.item(r,0)
+        for i in range(self.rowCount()):
+            senderItem:SenderItem = self.item(i,0)
             senderItem.pinMessage(msg,field,value)
+            
+            
             
             
     def pauseUpdates(self,b:bool):
@@ -731,7 +740,7 @@ class IvyModel(QStandardItemModel):
     ############### Updating the model ###############
     
     @pyqtSlot()
-    def updateTimes(self):
+    def update(self):
         for senderId in self.ivyRecorder.records.keys():
             try:
                 rowNumber = self.senderMap[senderId]
@@ -747,13 +756,13 @@ class IvyModel(QStandardItemModel):
                 
                 for i in newItems:
                     i.setEditable(False)
+                    i.setDragEnabled(False)
                 
                 self.appendRow(newItems)
-                
-                
+            
             for clsId in self.ivyRecorder.records[senderId].keys():
                 senderItem.updateMessageClass(self.ivyRecorder,clsId)
-            
+                            
 
 
 class FilteredIvyModel(QSortFilterProxyModel):
@@ -767,6 +776,7 @@ class FilteredIvyModel(QSortFilterProxyModel):
         self.__checkedOnly = False
         
         ivyModel.dataChanged.connect(lambda tl,br,r : self.dataChanged.emit(self.mapFromSource(tl),self.mapFromSource(br),r))
+        ivyModel.multiPinningDone.connect(lambda : self.invalidateFilter())
     
     def senderIndex(self,senderId:int) -> QModelIndex:
         ivyModel:IvyModel = self.sourceModel()
@@ -841,5 +851,7 @@ class FilteredIvyModel(QSortFilterProxyModel):
             
         else:
             regex_result = True
-
+            
         return checkstatus and regex_result
+    
+    
