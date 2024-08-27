@@ -15,6 +15,7 @@
 # You should have received a copy of the GNU General Public License
 # along with messages_python.  If not, see <https://www.gnu.org/licenses/>.
 
+import dataclasses
 import typing
 import time
 from functools import total_ordering
@@ -23,6 +24,41 @@ from functools import total_ordering
 from collections import deque
 
 from pprzlink.message import PprzMessage,PprzMessageField
+
+@dataclasses.dataclass
+class MessageIndex:
+    sender_id:typing.Optional[int] # Use None for Unknown sender
+    class_id:int
+    message_id:int
+    
+    def pprzMsg(self) -> PprzMessage:
+        return PprzMessage(self.class_id,self.message_id)
+    
+@dataclasses.dataclass
+class FieldIndex:
+    msgIndex:MessageIndex
+    field:str
+    array_index:typing.Optional[int] = None
+    
+    @staticmethod
+    def from_ints(s_id:int,c_id:int,m_id:int,f_str:str,a_id:typing.Optional[int]=None):
+        return FieldIndex(MessageIndex(s_id,c_id,m_id),f_str,a_id)
+    
+    @property
+    def sender_id(self) -> int:
+        return self.msgIndex.sender_id
+        
+    @property
+    def class_id(self) -> int:
+        return self.msgIndex.class_id
+    
+    @property
+    def message_id(self) -> int:
+        return self.msgIndex.message_id
+    
+    def pprzMsg(self) -> PprzMessage:
+        return self.msgIndex.pprzMsg()
+
 
 @total_ordering
 class TimedPprzMessage():
@@ -36,6 +72,12 @@ class TimedPprzMessage():
     
     def get_full_field(self, fieldname:str) -> PprzMessageField:
         return self.msg.get_full_field(fieldname)
+    
+    def __getattr__(self,key:str):
+        return self.msg.__getattr__(key)
+    
+    def __getitem__(self,key:str):
+        return self.msg.__getitem__(key)
     
     @property
     def name(self) -> str:
@@ -55,7 +97,7 @@ class TimedPprzMessage():
         
     @property
     def timestamp(self) -> int:
-        """Get the message reception timestamp."""
+        """Get the message reception timestamp (in ns by default)."""
         return self._timestamp
     
     # @property.setter
@@ -73,6 +115,9 @@ class TimedPprzMessage():
     
     def __lt__(self,other)->bool:
         return self.timestamp < other.timestamp
+    
+    def index(self) -> MessageIndex:
+        return MessageIndex(None,self.class_id,self.msg_id)
         
 
 class NoMessageError(Exception):
@@ -89,7 +134,15 @@ class MessageLog():
         
         self.__groupBy:typing.Optional[str] = None
         self.__groups:dict[typing.Any,MessageLog] = dict()
-    
+        
+        
+    def updateSize(self,s:int):
+        self.queue = deque(self.queue,maxlen=s)
+        for m in self.__groups.values():
+            m.updateSize(s)
+        
+    ########## Subgroup management ##########
+     
     def grouped(self) -> bool:
         return not(self.__groupBy is None)
     
@@ -118,6 +171,8 @@ class MessageLog():
         
     def subgroups(self):
         return self.__groups
+                 
+    ########## Manage messages ##########
                  
     def addMessage(self,msg:TimedPprzMessage):
         if len(self.queue) > 0:
@@ -156,6 +211,10 @@ class MessageLog():
                     self.__groups[field.val] = sublog
                     
                 sublog.addMessage(m)
+                
+
+    ########## Accessors ##########                
+                
     def newest(self) -> TimedPprzMessage:
         try:
             return self.queue[0]
@@ -188,6 +247,10 @@ class MessageLog():
     
     def fieldnames(self) -> list[str]:
         return self.newest().fieldnames
+    
+    def index(self) -> MessageIndex:
+        msg = self.newest()
+        return msg.index()
     
 
     

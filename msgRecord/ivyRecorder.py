@@ -15,18 +15,19 @@
 # You should have received a copy of the GNU General Public License
 # along with messages_python.  If not, see <https://www.gnu.org/licenses/>.
 
-import typing
+import typing,dataclasses
 
 from pprzlink.ivy import IvyMessagesInterface
 from pprzlink.message import PprzMessage
 
-from msgRecord.messageLog import MessageLog,TimedPprzMessage
+from msgRecord.messageLog import MessageLog,TimedPprzMessage,MessageIndex
 
 from PyQt5.QtCore import QObject,pyqtSignal
 
 class UnknownSenderError(Exception):
     def __init__(self, sender_id:int,known_ids:list[int]) -> None:
         super().__init__(f"Cannot record unknown sender: {sender_id}\nKnown senders are: {known_ids}")
+        
 
 class IvyRecorder(QObject):
     data_updated = pyqtSignal(int,int,int,bool) # (sender_id,class_id,msg_id,new_msg)
@@ -38,10 +39,13 @@ class IvyRecorder(QObject):
         self.ivy = IvyMessagesInterface(name,ivy_bus=ivy_bus) if ivy_bus is not None else IvyMessagesInterface(name)
         
         # Size of buffers for MessageLog
-        self.buffer_size = buffer_size
+        self.__buffer_size = buffer_size
         
         # Mapping from sender_id to bind_id (or None if the sender is known but has no binds)
-        self.known_senders:dict[int,typing.Optional[int]] = dict()
+        self.__known_senders:dict[int,typing.Optional[int]] = dict()
+        
+        # Mapping : sender_id -> class_id -> message_id -> bind_id (Register the bind ids of individually recorded messages)
+        self.__registered_msgs:dict[int,dict[int,dict[int,int]]] = dict()
         
         # Mapping : sender_id -> class_id -> message_id -> MessageLog
         self.records:dict[int,dict[int,dict[int,MessageLog]]] = dict()
@@ -56,14 +60,29 @@ class IvyRecorder(QObject):
         # Start Ivy
         self.ivy.start()
         
+    def getMessage(self,i:MessageIndex) -> MessageLog:
+        return self.records[i.sender_id][i.class_id][i.message_id]
+        
+    def updateBufferSize(self,bsize:int):
+        self.__buffer_size = bsize
+        for s in self.records.values():
+            for c in s.values():
+                for m in c.values():
+                    m.updateSize(bsize)
+        
     def __detectSenders(self,sender_id:int,msg:PprzMessage):
-        sender_id = int(sender_id)
-        if not(sender_id in self.known_senders.keys()):
-            self.known_senders[sender_id] = None
+        
+        try:    
+            sender_id = int(sender_id)
+        except ValueError as e:
+            print(msg.msg_class)
+            raise e
+        if not(sender_id in self.__known_senders.keys()):
+            self.__known_senders[sender_id] = None
             self.records[sender_id] = dict()
             self.new_sender.emit(sender_id)
         
-    def __recordMessage(self,sender_id:int,msg:PprzMessage):
+    def __logMessage(self,sender_id:int,msg:PprzMessage):
         sender_id = int(sender_id)
         timed_msg = TimedPprzMessage(msg)
         new_msg = False
@@ -78,36 +97,70 @@ class IvyRecorder(QObject):
         try:
             class_dict[timed_msg.msg_id].addMessage(timed_msg)
         except KeyError:
-            class_dict[timed_msg.msg_id] = MessageLog(self.buffer_size)
+            class_dict[timed_msg.msg_id] = MessageLog(self.__buffer_size)
             class_dict[timed_msg.msg_id].addMessage(timed_msg)
             new_msg = True
             
         self.data_updated.emit(sender_id,timed_msg.class_id,timed_msg.msg_id,new_msg)
         
+    def recordMessage(self,sender_id:int,msg:PprzMessage):
+        try:
+            bind = self.__registered_msgs[sender_id][msg.class_id][msg.msg_id]
+        except KeyError:
+            bind = None
+            
+        if bind is None:
+            if int(sender_id) == 0:
+                bind_id = self.ivy.subscribe(self.__logMessage,f'^([a-zA-Z]+ {msg.name} .*)')
+            else:                
+                bind_id = self.ivy.subscribe(self.__logMessage,f'^({sender_id} {msg.name} .*)')
+            
+            try:
+                sd = self.__registered_msgs[sender_id]
+            except KeyError:
+                sd = self.__registered_msgs[sender_id] = dict()
+            
+            try:
+                md = sd[msg._class_id]
+            except KeyError:
+                md = sd[msg._class_id] = dict()
+                
+            md[msg.msg_id] = bind_id
+            
+    def stopRecordingMessage(self,sender_id:int,msg:PprzMessage):
+        try:
+            bind = self.__registered_msgs[sender_id][msg.class_id][msg.msg_id]
+        except KeyError:
+            return
+        
+        if bind is not None:
+            self.ivy.unsubscribe(bind)
+            self.__registered_msgs[sender_id][msg.class_id][msg.msg_id] = None
+
 
     def recordSender(self,sender_id:int):
         try:
-            bind = self.known_senders[sender_id]
+            bind = self.__known_senders[sender_id]
         except KeyError:
-            raise UnknownSenderError(sender_id,list(self.known_senders.keys()))
+            raise UnknownSenderError(sender_id,list(self.__known_senders.keys()))
         
         if bind is None:
             # print(f"Binding to {sender_id}")
             if int(sender_id) == 0:
-                bind_id = self.ivy.subscribe(self.__recordMessage,f'^([a-zA-Z]+ .*)')
+                bind_id = self.ivy.subscribe(self.__logMessage,f'^([a-zA-Z]+ .*)')
             else:                
-                bind_id = self.ivy.subscribe(self.__recordMessage,f'^({sender_id} .*)')
-            self.known_senders[sender_id] = bind_id
+                bind_id = self.ivy.subscribe(self.__logMessage,f'^({sender_id} .*)')
+            self.__known_senders[sender_id] = bind_id
             
     def stopRecordingSender(self,sender_id:int):
         try:
-            bind = self.known_senders[sender_id]
+            bind = self.__known_senders[sender_id]
         except KeyError:
-            raise UnknownSenderError(sender_id,list(self.known_senders.keys()))
+            raise UnknownSenderError(sender_id,list(self.__known_senders.keys()))
         
         if bind is not None:
             self.ivy.unsubscribe(bind)
-            self.known_senders[sender_id] = None
+            self.__known_senders[sender_id] = None
             
     def stop(self):
         self.ivy.stop()
