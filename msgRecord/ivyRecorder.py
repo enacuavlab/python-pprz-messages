@@ -72,11 +72,15 @@ class IvyRecorder(QObject):
         
     def __detectSenders(self,sender_id:int,msg:PprzMessage):
         
-        try:    
+        if isinstance(sender_id,list):
+            for id in sender_id:
+                self.__detectSenders(id,msg)
+        elif isinstance(sender_id,str) and '[' in sender_id:
+            sender_id = sender_id[1:-1].split(',')
+            self.__detectSenders(sender_id)
+        else:   
             sender_id = int(sender_id)
-        except ValueError as e:
-            print(msg.msg_class)
-            raise e
+
         if not(sender_id in self.__known_senders.keys()):
             self.__known_senders[sender_id] = None
             self.records[sender_id] = dict()
