@@ -24,7 +24,7 @@ import enum
 
 
 
-from messagesWidget import MessagesView,FilteredIvyModel
+from msgWidgets.messagesWidget import MessagesView,FilteredIvyModel
 
 
 from PyQt5 import QtCore, QtGui

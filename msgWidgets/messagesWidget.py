@@ -29,7 +29,7 @@ from PyQt5.QtWidgets import QWidget,QApplication,\
 from PyQt5.QtCore import Qt,QModelIndex,pyqtSlot,QPoint
 
 
-from messagesFilter import MessagesFilter
+from msgWidgets.messagesFilter import MessagesFilter
 
 class MessagesView(QTreeView):
     def __init__(self, ivyModel:FilteredIvyModel,parent: QWidget | None = None) -> None:
@@ -59,7 +59,7 @@ class MessagesView(QTreeView):
         self.setSelectionMode(QTreeView.SelectionMode.SingleSelection)
         self.setDragDropMode(self.DragDropMode.DragOnly)
                         
-        localdir =  pathlib.Path(__file__).parent
+        localdir =  pathlib.Path(__file__).parent.parent
         
         style = """
 QTreeView::indicator:unchecked{

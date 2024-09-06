@@ -28,8 +28,8 @@ from PyQt5.QtWidgets import QWidget,QMainWindow,QApplication,\
 
 from PyQt5.QtCore import Qt,pyqtSlot
 
-from messagesWidget import MessagesWidget
-from pinnedMessagesView import PinnedMessages
+from msgWidgets.messagesWidget import MessagesWidget
+from msgWidgets.pinnedMessagesView import PinnedMessages
 
 
 class MessagesMain(QSplitter):
