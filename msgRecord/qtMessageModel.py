@@ -21,6 +21,8 @@ import math
 
 import enum
 
+from pprzlink.message import PprzMessageField
+
 from msgRecord.ivyRecorder import IvyRecorder,MessageLog
 from msgRecord.messageLog import NoMessageError
 
@@ -66,6 +68,38 @@ class SenderColumns(enum.IntEnum):
         ROOT = 0
         
 assert len(SenderColumns) <= COLUMN_COUNT
+
+#################### Helper function ####################
+
+def format_field_vals(field:PprzMessageField,val:typing.Optional[typing.Any] = None) -> typing.Tuple[str,str]: 
+    if val is None:
+        val = field.val
+       
+    if field.format and '%' in field.format:
+        valstr = field.format % val
+    else:
+        valstr = str(val)
+    
+    if field.unit and field.unit != 'none':
+        valstr += " " + field.unit
+    
+    if field.is_enum:
+        valstr += f" ({field.val_enum})"
+        
+        
+    altstr = ""
+    if field.val is not None and not(field.array_type):
+            alt_coef = 1. if field.alt_unit_coef is None else field.alt_unit_coef
+            
+            if alt_coef != 1.:
+                altstr = f"{field.val * field.alt_unit_coef:.3f}"
+                
+                if field.alt_unit:
+                    altstr += " " + field.alt_unit
+                    
+        
+    return valstr,altstr
+
 
 #################### Specific items ####################
 
@@ -170,7 +204,7 @@ class MessageSubgroupItem(QStandardItem):
             fieldAltValItem = QStandardItem()
             fieldAltValItem.setEditable(False)
             
-            newitems = [None] * COLUMN_COUNT
+            newitems = [None] * COLUMN_COUNT#####
             newitems[FieldColumns.ROOT] = fieldRootItem
             newitems[FieldColumns.VALUE] = fieldValueItem
             newitems[FieldColumns.ALT_VALUE] = fieldAltValItem
@@ -180,32 +214,18 @@ class MessageSubgroupItem(QStandardItem):
         
         fieldValueItem.setData(field.val,Qt.ItemDataRole.UserRole)
             
-        if field.format and '%' in field.format:
-            valstr = field.format % field.val
-        else:
-            valstr = str(field.val)
-        
-        if field.unit and field.unit != 'none':
-            valstr += " " + field.unit
-        
-        if field.is_enum:
-            valstr += f" ({field.val_enum})"
+        valstr,altstr = format_field_vals(field)
         
         fieldValueItem.setText(valstr)
+        fieldAltValItem.setText(altstr)
                     
         if field.val is not None and not(field.array_type):
             alt_coef = 1. if field.alt_unit_coef is None else field.alt_unit_coef
             
             fieldAltValItem.setData(alt_coef * field.val,Qt.ItemDataRole.UserRole)
             fieldAltValItem.setData(alt_coef,Qt.ItemDataRole.UserRole+1)
-            
-            if field.alt_unit_coef != 1. and field.alt_unit_coef != None:
-                altstr = f"{field.val * field.alt_unit_coef:.3f}"
+
                 
-                if field.alt_unit:
-                    altstr += " " + field.alt_unit
-                    
-                fieldAltValItem.setText(altstr)
         
 class MessageItem(QStandardItem):
     def __init__(self,msg:MessageLog):
@@ -334,33 +354,17 @@ class MessageItem(QStandardItem):
             self.appendRow(newitems)
             
         submsgValueItem.setData(val,Qt.ItemDataRole.UserRole)
-            
-        if field.format and '%' in field.format:
-            valstr = field.format % val
-        else:
-            valstr = str(val)
         
-        if field.unit and field.unit != 'none':
-            valstr += " " + field.unit
-        
-        if field.is_enum:
-            valstr += f" ({field.val_enum})"
+        valstr,altstr = format_field_vals(field,val)
         
         submsgValueItem.setText(valstr)
-                    
+        submsgAltValItem.setText(altstr)
+                                        
         if val is not None and not(field.array_type):
             alt_coef = 1. if field.alt_unit_coef is None else field.alt_unit_coef
             
             submsgAltValItem.setData(alt_coef * val,Qt.ItemDataRole.UserRole)
             submsgAltValItem.setData(alt_coef,Qt.ItemDataRole.UserRole+1)
-            
-            if field.alt_unit_coef != 1. and field.alt_unit_coef != None:
-                altstr = f"{val * field.alt_unit_coef:.3f}"
-                
-                if field.alt_unit:
-                    altstr += " " + field.alt_unit
-                    
-                submsgAltValItem.setText(altstr)
                 
         submsgRootItem.updateAllFields(submsg)
                 
@@ -401,32 +405,21 @@ class MessageItem(QStandardItem):
         
         fieldValueItem.setData(field.val,Qt.ItemDataRole.UserRole)
             
-        if field.format and '%' in field.format:
-            valstr = field.format % field.val
-        else:
-            valstr = str(field.val)
+        # if field.array_type:
+        #     print(f"Message {msg.msg_name()}, field {field.name}: {field.val} ({type(field.val)})")
         
-        if field.unit and field.unit != 'none':
-            valstr += " " + field.unit
-        
-        if field.is_enum:
-            valstr += f" ({field.val_enum})"
+        valstr,altstr = format_field_vals(field)
         
         fieldValueItem.setText(valstr)
+        fieldAltValItem.setText(altstr)
                     
         if field.val is not None and not(field.array_type):
             alt_coef = 1. if field.alt_unit_coef is None else field.alt_unit_coef
             
             fieldAltValItem.setData(alt_coef * field.val,Qt.ItemDataRole.UserRole)
             fieldAltValItem.setData(alt_coef,Qt.ItemDataRole.UserRole+1)
-            
-            if field.alt_unit_coef != 1. and field.alt_unit_coef != None:
-                altstr = f"{field.val * field.alt_unit_coef:.3f}"
-                
-                if field.alt_unit:
-                    altstr += " " + field.alt_unit
                     
-                fieldAltValItem.setText(altstr)
+                
 
 class MessageClassItem(QStandardItem):
     COLOR_FREQ = True
